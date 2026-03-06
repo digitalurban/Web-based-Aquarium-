@@ -75,7 +75,7 @@ export default function App() {
           
           {/* Options Menu */}
           <div 
-            className={`flex flex-wrap gap-2 justify-end items-center bg-slate-900/40 p-3 rounded-2xl border border-slate-700/50 backdrop-blur-md max-w-md md:max-w-2xl transition-all duration-300 origin-bottom-right ${
+            className={`flex flex-wrap gap-2 justify-end items-center bg-slate-900/80 p-3 rounded-2xl border border-slate-700/50 max-w-md md:max-w-2xl transition-all duration-300 origin-bottom-right ${
               showOptions ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
             }`}
           >
@@ -154,7 +154,7 @@ export default function App() {
           {/* Toggle Button */}
           <button 
             onClick={() => setShowOptions(!showOptions)}
-            className="bg-slate-900/80 hover:bg-slate-800/90 text-slate-200 border border-slate-700/50 px-5 py-2 rounded-full text-sm font-medium backdrop-blur-md transition-all active:scale-95 shadow-lg"
+            className="bg-slate-900/90 hover:bg-slate-800/95 text-slate-200 border border-slate-700/50 px-5 py-2 rounded-full text-sm font-medium transition-all active:scale-95 shadow-lg"
           >
             {showOptions ? 'Close' : 'Options'}
           </button>

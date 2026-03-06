@@ -391,13 +391,17 @@ export class Pebble {
   angle: number;
   lightColor: string;
   darkColor: string;
+  z: number;
 
   constructor(width: number, height: number) {
     this.x = Math.random() * width;
     // Spread pebbles across the bottom 60px
     this.y = height - Math.random() * 60;
-    this.rX = Math.random() * 3 + 1.5; // smaller, 1.5 to 4.5
-    this.rY = this.rX * (0.3 + Math.random() * 0.3); // flatter
+    this.z = Math.random() * 100;
+    
+    // Slightly larger pebbles to fill gaps better
+    this.rX = Math.random() * 10 + 6;
+    this.rY = this.rX * (0.4 + Math.random() * 0.4); // slightly rounder
     this.angle = Math.random() * Math.PI;
     
     // Darker, slightly blue-tinted colors to blend with deep water
@@ -419,17 +423,22 @@ export class Pebble {
   }
 
   draw(ctx: CanvasRenderingContext2D) {
-    const grad = ctx.createRadialGradient(
-      this.x - this.rX * 0.3, this.y - this.rY * 0.3, this.rX * 0.1,
-      this.x, this.y, this.rX
-    );
-    grad.addColorStop(0, this.lightColor);
-    grad.addColorStop(1, this.darkColor);
+    const depthScale = 0.6 + (this.z / 100) * 0.6;
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.scale(depthScale, depthScale);
     
-    ctx.fillStyle = grad;
+    ctx.fillStyle = this.darkColor;
     ctx.beginPath();
-    ctx.ellipse(this.x, this.y, this.rX, this.rY, this.angle, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, this.rX, this.rY, this.angle, 0, Math.PI * 2);
     ctx.fill();
+    
+    // Simple highlight instead of gradient
+    ctx.fillStyle = this.lightColor;
+    ctx.beginPath();
+    ctx.ellipse(-this.rX * 0.2, -this.rY * 0.2, this.rX * 0.4, this.rY * 0.4, this.angle, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
 }
 
@@ -440,12 +449,14 @@ export class Rock {
   height: number;
   lightColor: string;
   darkColor: string;
+  z: number;
 
   constructor(width: number, height: number) {
     this.x = Math.random() * width;
-    this.y = height - Math.random() * 40; // Spread rocks in depth
-    this.width = Math.random() * 40 + 30;
-    this.height = Math.random() * 20 + 15;
+    this.y = height - Math.random() * 50; // Spread rocks in depth
+    this.z = Math.random() * 100;
+    this.width = Math.random() * 50 + 40;
+    this.height = Math.random() * 25 + 20;
     
     const shade = 20 + Math.random() * 20; // Darker rocks
     this.lightColor = `rgb(${shade + 10}, ${shade + 15}, ${shade + 25})`; // Blue tint
@@ -453,17 +464,22 @@ export class Rock {
   }
 
   draw(ctx: CanvasRenderingContext2D) {
-    const grad = ctx.createRadialGradient(
-      this.x - this.width * 0.2, this.y - this.height * 0.2, this.width * 0.1,
-      this.x, this.y, this.width
-    );
-    grad.addColorStop(0, this.lightColor);
-    grad.addColorStop(1, this.darkColor);
-    
-    ctx.fillStyle = grad;
+    const depthScale = 0.6 + (this.z / 100) * 0.6;
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.scale(depthScale, depthScale);
+
+    ctx.fillStyle = this.darkColor;
     ctx.beginPath();
-    ctx.ellipse(this.x, this.y, this.width, this.height, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, this.width, this.height, 0, 0, Math.PI * 2);
     ctx.fill();
+    
+    // Simple highlight instead of gradient
+    ctx.fillStyle = this.lightColor;
+    ctx.beginPath();
+    ctx.ellipse(-this.width * 0.2, -this.height * 0.2, this.width * 0.5, this.height * 0.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
 }
 
@@ -619,31 +635,30 @@ export class Plant {
     ctx.stroke();
 
     // Draw leaves along the stem
-    const numLeaves = Math.floor(length / 8);
-    ctx.fillStyle = this.color;
+    // Reduce leaf density for performance and use simple lines instead of ellipses
+    const numLeaves = Math.floor(length / 12);
+    ctx.strokeStyle = this.color;
+    ctx.lineWidth = 1.5 + depth * 0.5;
+    ctx.beginPath();
     for (let i = 1; i <= numLeaves; i++) {
       const t = i / numLeaves;
       const px = (1-t)*(1-t)*startX + 2*(1-t)*t*(startX + sway*0.5) + t*t*endX;
       const py = (1-t)*(1-t)*startY + 2*(1-t)*t*(startY - length*0.5) + t*t*endY;
 
-      const leafSize = 2 + depth * 0.8;
+      const leafSize = 4 + depth * 1.5;
       
       // Whorl of leaves
       const whorlSway = Math.sin(time * 2 + i) * 0.1;
       const baseAngle = angle + whorlSway;
       
-      for (let j = 0; j < 3; j++) {
-        ctx.save();
-        ctx.translate(px, py);
-        const leafAngle = baseAngle + (j * Math.PI * 2 / 3);
-        ctx.rotate(leafAngle);
-        ctx.beginPath();
-        // Elodea leaves are thin and slightly curved
-        ctx.ellipse(leafSize * 1.5, 0, leafSize * 2, leafSize * 0.5, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
+      for (let j = 0; j < 2; j++) {
+        // Draw leaves roughly perpendicular to the stem
+        const leafAngle = baseAngle + (j * Math.PI) + (Math.PI / 2);
+        ctx.moveTo(px, py);
+        ctx.lineTo(px + Math.cos(leafAngle) * leafSize, py + Math.sin(leafAngle) * leafSize);
       }
     }
+    ctx.stroke();
 
     // Branching
     if (depth > 1) {
@@ -686,12 +701,14 @@ export class GhostShrimp {
   state: 'walking' | 'swimming' | 'climbing';
   targetPlant: Plant | null;
   swimPhase: number;
+  z: number;
 
   constructor(width: number, height: number) {
     this.width = width;
     this.height = height;
     this.x = Math.random() * width;
     this.y = height - 15;
+    this.z = Math.random() * 100;
     this.vx = 0;
     this.vy = 0;
     this.targetX = null;
@@ -881,7 +898,11 @@ export class GhostShrimp {
 
   draw(ctx: CanvasRenderingContext2D) {
     ctx.save();
+    
+    // Parallax scale based on z-depth (0.6x at back, 1.2x at front)
+    const depthScale = 0.6 + (this.z / 100) * 0.6;
     ctx.translate(this.x, this.y);
+    ctx.scale(depthScale, depthScale);
     
     // If facing right, flip the context because the default drawing faces left
     if (this.facingRight) {

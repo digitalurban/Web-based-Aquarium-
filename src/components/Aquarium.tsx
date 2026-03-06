@@ -27,7 +27,9 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
     environment: [] as (Pebble | Rock)[],
     plants: [] as Plant[],
     width: 0,
-    height: 0
+    height: 0,
+    bgGradient: null as CanvasGradient | null,
+    envCanvases: [] as HTMLCanvasElement[],
   });
 
   useImperativeHandle(ref, () => ({
@@ -70,9 +72,11 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
       const rocks: Rock[] = [];
       const plants: Plant[] = [];
       
-      for (let i = 0; i < 1200; i++) pebbles.push(new Pebble(sim.width, sim.height));
-      for (let i = 0; i < 8; i++) rocks.push(new Rock(sim.width, sim.height));
-      for (let i = 0; i < 30; i++) plants.push(new Plant(sim.width, sim.height));
+      // Increase pebble count for a denser floor
+      const numPebbles = sim.width < 800 ? 500 : 1000;
+      for (let i = 0; i < numPebbles; i++) pebbles.push(new Pebble(sim.width, sim.height));
+      for (let i = 0; i < 10; i++) rocks.push(new Rock(sim.width, sim.height));
+      for (let i = 0; i < 35; i++) plants.push(new Plant(sim.width, sim.height));
 
       // Combine and sort by Y coordinate for correct depth rendering
       sim.environment = [...pebbles, ...rocks].sort((a, b) => a.y - b.y);
@@ -82,7 +86,9 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
     const resize = () => {
       const parent = canvas.parentElement;
       if (parent) {
-        const dpr = window.devicePixelRatio || 1;
+        // Force devicePixelRatio to 1 for maximum performance on all devices, especially Safari
+        const dpr = 1;
+        
         canvas.width = parent.clientWidth * dpr;
         canvas.height = parent.clientHeight * dpr;
         ctx.scale(dpr, dpr);
@@ -92,7 +98,45 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
         sim.width = parent.clientWidth;
         sim.height = parent.clientHeight;
         
+        // Cache background gradient
+        const grad = ctx.createLinearGradient(0, 0, 0, sim.height);
+        grad.addColorStop(0, '#006994'); // Ocean blue surface
+        grad.addColorStop(0.5, '#004b75'); // Mid water
+        grad.addColorStop(1, '#001a2e'); // Deep water
+        sim.bgGradient = grad;
+
         generateEnvironment();
+        
+        // Cache static environment (pebbles and rocks) to layered offscreen canvases for parallax
+        const envCanvases: HTMLCanvasElement[] = [];
+        for (let i = 0; i < 3; i++) {
+          const ec = document.createElement('canvas');
+          ec.width = canvas.width;
+          ec.height = canvas.height;
+          const ectx = ec.getContext('2d');
+          if (ectx) {
+            ectx.scale(dpr, dpr);
+            
+            if (i === 0) {
+              // Draw a base gravel layer on the back-most canvas to prevent gaps
+              const gravelBaseHeight = 80;
+              const grad = ectx.createLinearGradient(0, sim.height - gravelBaseHeight, 0, sim.height);
+              grad.addColorStop(0, 'rgba(10, 20, 30, 0)');
+              grad.addColorStop(0.3, 'rgba(25, 35, 45, 0.9)');
+              grad.addColorStop(1, 'rgba(5, 10, 15, 1)');
+              ectx.fillStyle = grad;
+              ectx.fillRect(0, sim.height - gravelBaseHeight, sim.width, gravelBaseHeight);
+            }
+            
+            const minZ = i * 33.3;
+            const maxZ = (i + 1) * 33.3;
+            sim.environment
+              .filter(item => item.z >= minZ && item.z < maxZ)
+              .forEach(item => item.draw(ectx));
+          }
+          envCanvases.push(ec);
+        }
+        sim.envCanvases = envCanvases;
       }
     };
     
@@ -117,26 +161,22 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
       const { lightZoom } = stateRef.current;
 
       // Realistic Blue Deep water gradient
-      const grad = ctx.createLinearGradient(0, 0, 0, sim.height);
-      grad.addColorStop(0, '#006994'); // Ocean blue surface
-      grad.addColorStop(0.5, '#004b75'); // Mid water
-      grad.addColorStop(1, '#001a2e'); // Deep water
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, sim.width, sim.height);
+      if (sim.bgGradient) {
+        ctx.fillStyle = sim.bgGradient;
+        ctx.fillRect(0, 0, sim.width, sim.height);
+      }
 
       // Light rays
       ctx.save();
-      ctx.globalCompositeOperation = 'screen';
-      const numRays = 5;
+      // Use default composite operation (source-over) for best performance on Safari
+      const numRays = sim.width < 800 ? 3 : 5;
       const raySpread = 200 * lightZoom;
       
       for (let i = 0; i < numRays; i++) {
         const x = (sim.width / numRays) * i + Math.sin(time * 0.5 + i) * 50;
-        const rayGrad = ctx.createLinearGradient(x, 0, x, sim.height);
-        rayGrad.addColorStop(0, `rgba(200, 240, 255, ${0.06 * lightZoom})`);
-        rayGrad.addColorStop(1, 'rgba(200, 240, 255, 0)');
         
-        ctx.fillStyle = rayGrad;
+        // Use simple fill instead of gradient for rays to save performance
+        ctx.fillStyle = `rgba(180, 220, 255, ${0.04 * lightZoom})`;
         ctx.beginPath();
         ctx.moveTo(x - raySpread/2, 0);
         ctx.lineTo(x + raySpread/2, 0);
@@ -190,8 +230,8 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
         }
       }
 
-      // Random ambient bubbles
-      if (Math.random() < 0.02) {
+      // Random ambient bubbles (reduced frequency)
+      if (Math.random() < 0.005) {
         sim.bubbles.push(new Bubble(Math.random() * sim.width, sim.height - 20, 0.5));
       }
       
@@ -201,11 +241,6 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
         b.draw(ctx);
       });
 
-      // Static Environment (Depth Sorted by Y)
-      sim.environment.forEach(item => {
-        item.draw(ctx);
-      });
-
       // Foods
       sim.foods = sim.foods.filter(f => !f.eaten);
       sim.foods.forEach(f => {
@@ -213,31 +248,52 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
         f.draw(ctx);
       });
 
-      // Shrimps
-      sim.shrimps.forEach(s => {
-        s.update(sim.width, sim.height, sim.foods, sim.plants);
-        s.draw(ctx);
-      });
-
-      // Parallax Entities (Plants and Fishes sorted by Z)
-      const parallaxEntities: { type: 'plant' | 'fish', z: number, obj: any }[] = [
+      // Parallax Entities (Plants, Fishes, and Shrimps sorted by Z)
+      const parallaxEntities: { type: 'plant' | 'fish' | 'shrimp', z: number, obj: any }[] = [
         ...(sim.plants || []).map(p => ({ type: 'plant' as const, z: p.z, obj: p })),
-        ...sim.fishes.map(f => ({ type: 'fish' as const, z: f.z, obj: f }))
+        ...sim.fishes.map(f => ({ type: 'fish' as const, z: f.z, obj: f })),
+        ...sim.shrimps.map(s => ({ type: 'shrimp' as const, z: s.z, obj: s }))
       ];
 
       parallaxEntities.sort((a, b) => a.z - b.z);
 
+      let currentEnvLayer = 0;
+      const drawEnvLayer = (layer: number) => {
+        if (sim.envCanvases[layer]) {
+          ctx.save();
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.drawImage(sim.envCanvases[layer], 0, 0);
+          ctx.restore();
+        }
+      };
+
       parallaxEntities.forEach(entity => {
+        // Interleave environment layers based on z-depth
+        while (currentEnvLayer < 3 && entity.z > (currentEnvLayer + 1) * 33.3) {
+          drawEnvLayer(currentEnvLayer);
+          currentEnvLayer++;
+        }
+
         if (entity.type === 'plant') {
           const p = entity.obj as Plant;
           p.update();
           p.draw(ctx, time, flow);
-        } else {
+        } else if (entity.type === 'fish') {
           const f = entity.obj as VectorFish;
           f.update(sim.width, sim.height, sim.fishes, sim.foods, flow);
           f.draw(ctx);
+        } else if (entity.type === 'shrimp') {
+          const s = entity.obj as GhostShrimp;
+          s.update(sim.width, sim.height, sim.foods, sim.plants);
+          s.draw(ctx);
         }
       });
+
+      // Draw remaining environment layers
+      while (currentEnvLayer < 3) {
+        drawEnvLayer(currentEnvLayer);
+        currentEnvLayer++;
+      }
 
       animationId = requestAnimationFrame(loop);
     };
