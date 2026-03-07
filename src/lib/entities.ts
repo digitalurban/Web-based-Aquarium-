@@ -32,13 +32,13 @@ export class VectorFish {
     if (this.species === 'clownfish') {
       this.y = height - 150 - Math.random() * 150; // Clownfish prefer bottom
       this.size = 1.0 + Math.random() * 0.3;
-      this.baseSpeed = 0.6 + Math.random() * 0.3;
-      this.maxForce = 0.03 + Math.random() * 0.01;
+      this.baseSpeed = 1.2 + Math.random() * 0.8;
+      this.maxForce = 0.10 + Math.random() * 0.08;
     } else {
       this.y = Math.random() * (height - 200) + 100; // Tetras everywhere
       this.size = 0.8 + Math.random() * 0.3;
-      this.baseSpeed = 0.9 + Math.random() * 0.4;
-      this.maxForce = 0.04 + Math.random() * 0.02;
+      this.baseSpeed = 1.0 + Math.random() * 0.5;
+      this.maxForce = 0.08 + Math.random() * 0.04; // Increased power for schooling
     }
     
     this.angle = Math.random() * Math.PI * 2;
@@ -86,8 +86,8 @@ export class VectorFish {
       let aliX = 0, aliY = 0, aliCount = 0;
       let cohX = 0, cohY = 0, cohCount = 0;
 
-      const perceptionRadius = this.species === 'tetra' ? 120 : 60;
-      const separationRadius = 35 * this.size;
+      const perceptionRadius = this.species === 'tetra' ? 150 : 200;
+      const separationRadius = (this.species === 'tetra' ? 30 : 100) * this.size;
 
       for (const other of fishes) {
         if (other === this) continue;
@@ -112,8 +112,9 @@ export class VectorFish {
       }
 
       if (sepCount > 0) {
-        ax += (sepX / sepCount) * this.maxForce * 2.0;
-        ay += (sepY / sepCount) * this.maxForce * 2.0;
+        const sepMult = this.species === 'tetra' ? 2.5 : 3.5;
+        ax += (sepX / sepCount) * this.maxForce * sepMult;
+        ay += (sepY / sepCount) * this.maxForce * sepMult;
       }
 
       if (aliCount > 0) {
@@ -121,8 +122,9 @@ export class VectorFish {
         aliY /= aliCount;
         const speed = Math.sqrt(aliX * aliX + aliY * aliY);
         if (speed > 0) {
-          ax += ((aliX / speed) * this.maxSpeed - this.vx) * this.maxForce * 0.8;
-          ay += ((aliY / speed) * this.maxSpeed - this.vy) * this.maxForce * 0.8;
+          const aliMult = this.species === 'tetra' ? 1.2 : 1.4;
+          ax += ((aliX / speed) * this.maxSpeed - this.vx) * this.maxForce * aliMult;
+          ay += ((aliY / speed) * this.maxSpeed - this.vy) * this.maxForce * aliMult;
         }
         
         cohX /= cohCount;
@@ -131,15 +133,39 @@ export class VectorFish {
         const dy = cohY - this.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
         if (dist > 0) {
-          ax += ((dx / dist) * this.maxSpeed - this.vx) * this.maxForce * 0.5;
-          ay += ((dy / dist) * this.maxSpeed - this.vy) * this.maxForce * 0.5;
+          const cohMult = this.species === 'tetra' ? 0.8 : 1.1;
+          ax += ((dx / dist) * this.maxSpeed - this.vx) * this.maxForce * cohMult;
+          ay += ((dy / dist) * this.maxSpeed - this.vy) * this.maxForce * cohMult;
         }
       }
 
       // 3. Wander
       const time = Date.now() / 1000 + this.idOffset;
-      ax += Math.cos(time * 0.5) * this.maxForce * 0.4;
-      ay += Math.sin(time * 0.6) * this.maxForce * 0.4;
+      const wanderMult = this.species === 'tetra' ? 0.8 : 1.8;
+      ax += Math.cos(time * 0.5) * this.maxForce * wanderMult;
+      ay += Math.sin(time * 0.6) * this.maxForce * wanderMult;
+      
+      // Swim against current instinct
+      if (flow > 0 && this.x > width * 0.4) {
+        // Stronger urge to swim left as they get further right
+        const rightBias = (this.x - width * 0.4) / (width * 0.6);
+        ax -= (flow / 100) * this.maxForce * (1.0 + rightBias * 2.0); 
+      }
+
+      // Repel from side filter (top pump) area for tetras
+      if (this.species === 'tetra') {
+        const pumpX = 0;
+        const pumpY = 80;
+        const dx = this.x - pumpX;
+        const dy = this.y - pumpY;
+        const distSq = dx * dx + dy * dy;
+        if (distSq < 120 * 120) {
+          const dist = Math.sqrt(distSq);
+          const force = (1 - dist / 120) * this.maxForce * 3.0;
+          ax += (dx / dist) * force;
+          ay += (dy / dist) * force;
+        }
+      }
       
       // Clownfish prefer bottom
       if (this.species === 'clownfish') {
@@ -151,13 +177,19 @@ export class VectorFish {
     // 4. Avoid Walls smoothly
     const marginX = 100;
     const marginY = 80;
-    const turnFactor = this.maxForce * 3;
+    const turnFactor = this.maxForce * 6;
     
     if (this.x < marginX) ax += turnFactor * (marginX - this.x) / marginX;
     if (this.x > width - marginX) ax -= turnFactor * (this.x - (width - marginX)) / marginX;
     
     if (this.y < marginY) ay += turnFactor * (marginY - this.y) / marginY;
     if (this.y > height - marginY - 50) ay -= turnFactor * (this.y - (height - marginY - 50)) / marginY;
+
+    // 5. Flow effect (Horizontal push from left to right)
+    const flowMag = flow / 100;
+    // Apply flow as a force (acceleration) instead of direct velocity addition
+    // This allows fish to swim against it more naturally
+    ax += flowMag * 0.025; // Slightly reduced push
 
     // Apply acceleration
     this.vx += ax;
@@ -296,6 +328,7 @@ export class Bubble {
   y: number;
   size: number;
   vy: number;
+  vx: number = 0;
   wobble: number;
   wobbleSpeed: number;
   startX: number;
@@ -312,17 +345,34 @@ export class Bubble {
     this.wobbleSpeed = Math.random() * 0.1 + 0.05;
   }
 
-  update(flow: number) {
+  update(flow: number, width: number) {
     const flowMag = flow / 100;
-    this.y += this.vy * (1 + flowMag * 0.5);
+    // Rise speed slightly affected by flow turbulence
+    this.y += this.vy * (1 + flowMag * 0.3);
     this.wobble += this.wobbleSpeed * (1 + flowMag * 2);
     
+    // Apply horizontal velocity (initial push)
+    this.startX += this.vx;
+    this.vx *= 0.96; // Decay velocity over time
+    
     // Flow pushes bubbles horizontally as they rise
-    this.startX += flowMag * 1.5;
+    // Reduced push for bubbles on the left
+    const xFactor = 0.15 + 0.85 * Math.min(1, this.startX / (width * 0.4));
+    this.startX += flowMag * 0.625 * xFactor;
     
     // More wobble for smaller bubbles, and flow increases wobble width
-    const wobbleWidth = (3 / this.size) * (1 + flowMag * 5);
+    const wobbleWidth = (3 / this.size) * (1 + flowMag * 6);
     this.x = this.startX + Math.sin(this.wobble) * wobbleWidth;
+
+    // Keep bubbles inside the tank horizontally
+    if (this.x > width - 5) {
+      this.x = width - 5;
+      this.startX = this.x - Math.sin(this.wobble) * wobbleWidth;
+    }
+    if (this.x < 5) {
+      this.x = 5;
+      this.startX = this.x - Math.sin(this.wobble) * wobbleWidth;
+    }
   }
 
   draw(ctx: CanvasRenderingContext2D) {
@@ -556,12 +606,13 @@ export class Plant {
     ctx.translate(-this.x, -this.y);
 
     const flowMag = flow / 100;
+    const flowTilt = flowMag * 40; // Constant tilt to the right
     
     if (this.type === 'grass' && this.blades) {
       ctx.fillStyle = this.color;
       for (const blade of this.blades) {
         const h = this.currentHeight * blade.hMult;
-        const sway = Math.sin(time * (1.5 + flowMag * 1.2) + this.swayPhase + blade.swayOff) * (h * (flowMag * 0.14));
+        const sway = flowTilt + Math.sin(time * (1.5 + flowMag * 1.2) + this.swayPhase + blade.swayOff) * (h * (flowMag * 0.14));
         const bx = this.x + blade.xOff;
         
         ctx.beginPath();
@@ -572,10 +623,10 @@ export class Plant {
       }
     } else if (this.type === 'elodea') {
       const seedState = { val: this.x * 1000 };
-      this.drawElodeaBranch(ctx, this.x, this.y, this.currentHeight * 0.4, 0, 3, time, flowMag, this.swayPhase, seedState);
+      this.drawElodeaBranch(ctx, this.x, this.y, this.currentHeight * 0.4, flowTilt * 0.01, 3, time, flowMag, this.swayPhase, seedState);
     } else {
       // Leafy
-      const sway = Math.sin(time * (1.2 + flowMag * 1.2) + this.swayPhase) * (this.currentHeight * (flowMag * 0.14));
+      const sway = flowTilt + Math.sin(time * (1.2 + flowMag * 1.2) + this.swayPhase) * (this.currentHeight * (flowMag * 0.14));
       
       ctx.strokeStyle = this.color;
       ctx.lineWidth = 3;
@@ -702,6 +753,7 @@ export class GhostShrimp {
   targetPlant: Plant | null;
   swimPhase: number;
   z: number;
+  vz: number;
 
   constructor(width: number, height: number) {
     this.width = width;
@@ -709,6 +761,7 @@ export class GhostShrimp {
     this.x = Math.random() * width;
     this.y = height - 15;
     this.z = Math.random() * 100;
+    this.vz = 0; // Velocity in z-direction
     this.vx = 0;
     this.vy = 0;
     this.targetX = null;
@@ -752,21 +805,27 @@ export class GhostShrimp {
       } else {
         if (this.targetX === null || Math.abs(this.targetX - this.x) < 5) {
           const rand = Math.random();
-          if (rand < 0.005 && plants.length > 0) {
+          if (rand < 0.015 && plants.length > 0) {
             // Start climbing
             this.state = 'climbing';
             this.targetPlant = plants[Math.floor(Math.random() * plants.length)];
             this.targetX = this.targetPlant.x;
-          } else if (rand < 0.01) {
-            // Start swimming
+          } else if (rand < 0.02) {
+            // Start swimming and change depth
             this.state = 'swimming';
-            this.targetX = this.x + (Math.random() * 200 - 100);
-            this.targetY = this.y - 50 - Math.random() * 150;
-            this.targetX = Math.max(20, Math.min(this.width - 20, this.targetX));
-          } else if (rand < 0.03) {
             this.targetX = this.x + (Math.random() * 300 - 150);
+            this.targetY = this.y - 100 - Math.random() * 250; // Swim higher
             this.targetX = Math.max(20, Math.min(this.width - 20, this.targetX));
-          } else if (rand < 0.08) {
+            this.targetY = Math.max(50, this.targetY);
+            
+            // Randomly move towards front (z=100) or back (z=0)
+            const targetZ = Math.random() * 100;
+            const dz = targetZ - this.z;
+            this.vz = dz * 0.01;
+          } else if (rand < 0.05) {
+            this.targetX = this.x + (Math.random() * 400 - 200);
+            this.targetX = Math.max(20, Math.min(this.width - 20, this.targetX));
+          } else if (rand < 0.1) {
             this.targetX = null; // stop moving
           }
         }
@@ -776,19 +835,22 @@ export class GhostShrimp {
         this.targetX = Math.max(10, Math.min(this.width - 10, this.targetX));
         const dx = this.targetX - this.x;
         if (Math.abs(dx) > 2) {
-          this.vx = Math.sign(dx) * 0.15; // Slower walking speed
+          this.vx = Math.sign(dx) * 0.12; // Reduced walking speed
           this.facingRight = this.vx > 0;
-          this.legPhase += 0.04; // Slower leg movement to match
+          this.legPhase += 0.03;
         } else {
           this.vx = 0;
         }
       } else {
         this.vx = 0;
       }
+      
+      // Friction for z-velocity
+      this.vz *= 0.95;
 
     } else if (this.state === 'swimming') {
       this.swimPhase += 0.1;
-      this.legPhase += 0.15; // Legs move faster when swimming
+      this.legPhase += 0.1; // Reduced leg speed
       
       if (this.targetX !== null && this.targetY !== null) {
         this.targetX = Math.max(10, Math.min(this.width - 10, this.targetX));
@@ -797,8 +859,8 @@ export class GhostShrimp {
         const dist = Math.sqrt(dx * dx + dy * dy);
         
         if (dist > 5) {
-          this.vx = (dx / dist) * 0.5;
-          this.vy = (dy / dist) * 0.5;
+          this.vx = (dx / dist) * 0.4; // Reduced swimming speed
+          this.vy = (dy / dist) * 0.4;
           this.facingRight = this.vx > 0;
         } else {
           // Reached target, either swim somewhere else or sink back down
@@ -812,6 +874,7 @@ export class GhostShrimp {
             // Swim down to the floor
             this.targetX = this.x;
             this.targetY = floorY;
+            this.vz = 0;
           }
         }
       } else {
@@ -819,6 +882,11 @@ export class GhostShrimp {
         this.targetX = this.x;
         this.targetY = floorY;
       }
+      
+      // Apply z-velocity
+      this.z += this.vz;
+      if (this.z < 0) { this.z = 0; this.vz = 0; }
+      if (this.z > 100) { this.z = 100; this.vz = 0; }
       
       // Add a little bobbing motion when swimming
       this.vy += Math.sin(this.swimPhase) * 0.1;
@@ -918,12 +986,13 @@ export class GhostShrimp {
       ctx.rotate(this.vy < 0 ? 0.5 : -0.5);
     }
 
-    // Pink shrimp colors
-    ctx.strokeStyle = 'rgba(255, 150, 180, 0.6)';
-    ctx.fillStyle = 'rgba(255, 180, 200, 0.4)';
-    ctx.lineWidth = 1.5;
+    // Pink shrimp colors - increased opacity
+    ctx.strokeStyle = 'rgba(255, 180, 200, 0.9)';
+    ctx.fillStyle = 'rgba(255, 200, 220, 0.6)';
+    ctx.lineWidth = 2;
 
-    // Body
+    // Body - reduced scale (0.7x)
+    ctx.scale(0.7, 0.7);
     ctx.beginPath();
     ctx.moveTo(-12, 0); // Head
     ctx.quadraticCurveTo(-5, -8, 5, -5); // Back
@@ -966,6 +1035,117 @@ export class GhostShrimp {
     ctx.arc(-9, -3, 1.2, 0, Math.PI * 2);
     ctx.fill();
 
+    ctx.restore();
+  }
+}
+
+export class SideFilter {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  aquariumWidth: number;
+  aquariumHeight: number;
+
+  constructor(aquariumWidth: number, aquariumHeight: number) {
+    this.aquariumWidth = aquariumWidth;
+    this.aquariumHeight = aquariumHeight;
+    this.width = 40;
+    this.height = 60;
+    this.x = 0; // Attached to left wall
+    this.y = 80; // Positioned vertically
+  }
+
+  update(simBubbles: Bubble[], time: number, flow: number) {
+    // Spawn bubbles from the nozzle shooting across
+    if (flow > 0) {
+      const spawnChance = (flow / 100) * 0.8;
+      if (Math.random() < spawnChance) {
+        const bX = this.x + this.width + 15; // End of nozzle
+        const bY = this.y + 30 + (Math.random() * 10 - 5); // Center of nozzle
+        const bubble = new Bubble(bX, bY, 0.5 + Math.random() * 0.8);
+        // Give these bubbles a strong initial horizontal velocity (shooting out)
+        bubble.vx = (flow / 100) * 15; 
+        simBubbles.push(bubble);
+      }
+    }
+  }
+
+  draw(ctx: CanvasRenderingContext2D, time: number, flow: number) {
+    ctx.save();
+    
+    // Draw the filter unit on the side wall
+    const unitGrad = ctx.createLinearGradient(this.x, this.y, this.x + this.width, this.y);
+    unitGrad.addColorStop(0, '#111');
+    unitGrad.addColorStop(1, '#333');
+    ctx.fillStyle = unitGrad;
+    ctx.strokeStyle = '#444';
+    ctx.lineWidth = 2;
+    
+    // Main body (box attached to wall)
+    ctx.beginPath();
+    ctx.roundRect(this.x - 5, this.y, this.width + 5, this.height, 5);
+    ctx.fill();
+    ctx.stroke();
+
+    // Nozzle
+    ctx.fillStyle = '#222';
+    ctx.beginPath();
+    ctx.moveTo(this.x + this.width, this.y + 15);
+    ctx.lineTo(this.x + this.width + 15, this.y + 20);
+    ctx.lineTo(this.x + this.width + 15, this.y + 40);
+    ctx.lineTo(this.x + this.width, this.y + 45);
+    ctx.fill();
+    ctx.stroke();
+
+    // Horizontal flow effect if flow > 0
+    if (flow > 0) {
+      const flowFactor = flow / 100;
+      const jetLength = 300 * flowFactor; // Longer jet
+      
+      ctx.save();
+      // Draw horizontal "jet" lines
+      ctx.lineWidth = 1.5;
+      for (let i = 0; i < 5; i++) {
+        const lineY = this.y + 18 + i * 6;
+        const speed = 200 * flowFactor;
+        const offset = (time * speed + i * 40) % (jetLength + 100);
+        
+        const grad = ctx.createLinearGradient(this.x + this.width + 15, lineY, this.x + this.width + 15 + jetLength, lineY);
+        grad.addColorStop(0, 'rgba(255, 255, 255, 0.3)');
+        grad.addColorStop(0.5, 'rgba(255, 255, 255, 0.15)');
+        grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        
+        ctx.strokeStyle = grad;
+        ctx.setLineDash([20, 30]);
+        ctx.lineDashOffset = -offset;
+        
+        ctx.beginPath();
+        ctx.moveTo(this.x + this.width + 15, lineY);
+        ctx.lineTo(this.x + this.width + 15 + jetLength, lineY + Math.sin(time * 3 + i) * 8);
+        ctx.stroke();
+      }
+      
+      // Small particles/bubbles in the jet that travel further
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+      const particleCount = 15;
+      for (let i = 0; i < particleCount; i++) {
+        const pSpeed = (150 + (i % 5) * 50) * flowFactor;
+        const pOffset = (time * pSpeed + i * 80) % (this.aquariumWidth + 100);
+        const pX = this.x + this.width + 15 + pOffset;
+        
+        // Only draw if within aquarium width
+        if (pX < this.aquariumWidth) {
+          const pY = this.y + 30 + Math.sin(time * 8 + i) * 15;
+          const pSize = 0.5 + (i % 3) * 0.5;
+          ctx.beginPath();
+          ctx.arc(pX, pY, pSize, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      ctx.restore();
+    }
+    
     ctx.restore();
   }
 }

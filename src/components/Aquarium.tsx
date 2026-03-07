@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
-import { VectorFish, Bubble, Food, Pebble, Rock, Plant, GhostShrimp } from '../lib/entities';
+import { VectorFish, Bubble, Food, Pebble, Rock, Plant, GhostShrimp, SideFilter } from '../lib/entities';
 
 export interface AquariumRef {
   addFish: (species: 'tetra' | 'clownfish') => void;
@@ -26,6 +26,7 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
     shrimps: [] as GhostShrimp[],
     environment: [] as (Pebble | Rock)[],
     plants: [] as Plant[],
+    sideFilter: null as SideFilter | null,
     width: 0,
     height: 0,
     bgGradient: null as CanvasGradient | null,
@@ -98,11 +99,13 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
         sim.width = parent.clientWidth;
         sim.height = parent.clientHeight;
         
+        sim.sideFilter = new SideFilter(sim.width, sim.height);
+        
         // Cache background gradient
         const grad = ctx.createLinearGradient(0, 0, 0, sim.height);
-        grad.addColorStop(0, '#006994'); // Ocean blue surface
-        grad.addColorStop(0.5, '#004b75'); // Mid water
-        grad.addColorStop(1, '#001a2e'); // Deep water
+        grad.addColorStop(0, '#0099dd'); // Brighter ocean blue surface
+        grad.addColorStop(0.5, '#0066aa'); // Vibrant mid water
+        grad.addColorStop(1, '#004477'); // Lighter deep water
         sim.bgGradient = grad;
 
         generateEnvironment();
@@ -176,7 +179,7 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
         const x = (sim.width / numRays) * i + Math.sin(time * 0.5 + i) * 50;
         
         // Use simple fill instead of gradient for rays to save performance
-        ctx.fillStyle = `rgba(180, 220, 255, ${0.04 * lightZoom})`;
+        ctx.fillStyle = `rgba(200, 235, 255, ${0.05 * lightZoom})`;
         ctx.beginPath();
         ctx.moveTo(x - raySpread/2, 0);
         ctx.lineTo(x + raySpread/2, 0);
@@ -187,7 +190,7 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
       ctx.restore();
 
       // Water surface
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+      ctx.fillStyle = 'rgba(220, 245, 255, 0.08)';
       ctx.beginPath();
       ctx.moveTo(0, 0);
       for (let x = 0; x <= sim.width; x += 20) {
@@ -215,6 +218,12 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
       const flow = rawFlow * 0.3;
 
       drawBackground();
+      
+      // Side Filter
+      if (sim.sideFilter) {
+        sim.sideFilter.update(sim.bubbles, time, rawFlow);
+        sim.sideFilter.draw(ctx, time, rawFlow);
+      }
 
       // Air Pump Bubbles
       if (airPump > 0) {
@@ -237,7 +246,7 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
       
       sim.bubbles = sim.bubbles.filter(b => b.y + b.size > 0);
       sim.bubbles.forEach(b => {
-        b.update(flow);
+        b.update(flow, sim.width);
         b.draw(ctx);
       });
 
