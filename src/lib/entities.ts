@@ -48,7 +48,7 @@ export class VectorFish {
     this.idOffset = Math.random() * 1000;
   }
 
-  update(width: number, height: number, fishes: VectorFish[], foods: Food[], flow: number) {
+  update(width: number, height: number, fishes: VectorFish[], foods: Food[], flow: number, environment: (Pebble | Rock | Driftwood)[]) {
     let ax = 0;
     let ay = 0;
 
@@ -171,6 +171,34 @@ export class VectorFish {
       if (this.species === 'clownfish') {
         const targetY = height - 100;
         ay += (targetY - this.y) * 0.0002;
+      }
+
+      // 4. Hardscape Interactions
+      for (const item of environment) {
+        if (item instanceof Pebble) continue;
+        
+        const dx = this.x - item.x;
+        const dy = this.y - item.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        
+        // Avoidance
+        const avoidRadius = item instanceof Rock ? item.width * 0.8 : item.width * 0.5;
+        if (dist < avoidRadius) {
+          const force = (1 - dist / avoidRadius) * this.maxForce * 5.0;
+          ax += (dx / dist) * force;
+          ay += (dy / dist) * force;
+        }
+
+        // Clownfish Territory Attraction
+        if (this.species === 'clownfish') {
+          const territoryRadius = 300;
+          if (dist < territoryRadius) {
+            // Gentle pull towards the hardscape
+            const pull = (1 - dist / territoryRadius) * 0.0005;
+            ax -= dx * pull;
+            ay -= dy * pull;
+          }
+        }
       }
     }
 
@@ -445,13 +473,13 @@ export class Pebble {
 
   constructor(width: number, height: number) {
     this.x = Math.random() * width;
-    // Spread pebbles across the bottom 60px
-    this.y = height - Math.random() * 60;
+    // Spread pebbles across the bottom 40px
+    this.y = height - Math.random() * 40;
     this.z = Math.random() * 100;
     
-    // Slightly larger pebbles to fill gaps better
-    this.rX = Math.random() * 10 + 6;
-    this.rY = this.rX * (0.4 + Math.random() * 0.4); // slightly rounder
+    // Slightly smaller pebbles
+    this.rX = Math.random() * 6 + 4;
+    this.rY = this.rX * (0.4 + Math.random() * 0.4);
     this.angle = Math.random() * Math.PI;
     
     // Darker, slightly blue-tinted colors to blend with deep water
@@ -497,20 +525,33 @@ export class Rock {
   y: number;
   width: number;
   height: number;
-  lightColor: string;
-  darkColor: string;
+  color: string;
+  detailColor: string;
   z: number;
+  points: {x: number, y: number}[];
 
   constructor(width: number, height: number) {
     this.x = Math.random() * width;
-    this.y = height - Math.random() * 50; // Spread rocks in depth
+    this.y = height - 20 - Math.random() * 30;
     this.z = Math.random() * 100;
-    this.width = Math.random() * 50 + 40;
-    this.height = Math.random() * 25 + 20;
+    this.width = 150 + Math.random() * 150;
+    this.height = 100 + Math.random() * 120;
     
-    const shade = 20 + Math.random() * 20; // Darker rocks
-    this.lightColor = `rgb(${shade + 10}, ${shade + 15}, ${shade + 25})`; // Blue tint
-    this.darkColor = `rgb(${shade - 15}, ${shade - 10}, ${shade - 5})`;
+    const shade = 60 + Math.random() * 40;
+    this.color = `rgb(${shade}, ${shade}, ${shade})`; // Neutral gray
+    this.detailColor = `rgb(${shade - 20}, ${shade - 20}, ${shade - 20})`;
+    
+    // Generate irregular rock shape
+    this.points = [];
+    const segments = 12;
+    for (let i = 0; i < segments; i++) {
+      const angle = (i / segments) * Math.PI * 2;
+      const r = 0.8 + Math.random() * 0.8;
+      this.points.push({
+        x: Math.cos(angle) * this.width * 0.5 * r,
+        y: Math.sin(angle) * this.height * 0.5 * r
+      });
+    }
   }
 
   draw(ctx: CanvasRenderingContext2D) {
@@ -519,16 +560,188 @@ export class Rock {
     ctx.translate(this.x, this.y);
     ctx.scale(depthScale, depthScale);
 
-    ctx.fillStyle = this.darkColor;
+    // Subtle shadow
+    ctx.globalAlpha = 0.2;
+    ctx.fillStyle = '#000';
     ctx.beginPath();
-    ctx.ellipse(0, 0, this.width, this.height, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, this.height * 0.3, this.width * 0.6, this.height * 0.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1.0;
+
+    ctx.fillStyle = this.color;
+    ctx.strokeStyle = this.detailColor;
+    ctx.lineWidth = 2;
+    
+    ctx.beginPath();
+    const p0 = this.points[0];
+    const pLast = this.points[this.points.length - 1];
+    ctx.moveTo((p0.x + pLast.x) / 2, (p0.y + pLast.y) / 2);
+    for (let i = 0; i < this.points.length; i++) {
+      const p1 = this.points[i];
+      const p2 = this.points[(i + 1) % this.points.length];
+      const midX = (p1.x + p2.x) / 2;
+      const midY = (p1.y + p2.y) / 2;
+      ctx.quadraticCurveTo(p1.x, p1.y, midX, midY);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Highlights
+    ctx.globalAlpha = 0.2;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    const hp0 = this.points[0];
+    ctx.moveTo(hp0.x * 0.7, hp0.y * 0.7);
+    for (let i = 0; i < Math.floor(this.points.length / 2); i++) {
+      const p1 = this.points[i];
+      const p2 = this.points[(i + 1) % this.points.length];
+      const midX = ((p1.x + p2.x) / 2) * 0.7;
+      const midY = ((p1.y + p2.y) / 2) * 0.7;
+      ctx.quadraticCurveTo(p1.x * 0.7, p1.y * 0.7, midX, midY);
+    }
+    ctx.fill();
+
+    // Moss/Algae (very subtle)
+    ctx.globalAlpha = 0.1;
+    ctx.fillStyle = '#1b5e20';
+    ctx.beginPath();
+    for (let i = 0; i < this.points.length; i++) {
+      if (this.points[i].y < -this.height * 0.2) { // Only on top parts
+        ctx.arc(this.points[i].x, this.points[i].y, 8, 0, Math.PI * 2);
+      }
+    }
     ctx.fill();
     
-    // Simple highlight instead of gradient
-    ctx.fillStyle = this.lightColor;
+    ctx.restore();
+  }
+}
+
+export class Driftwood {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  z: number;
+  rotation: number;
+  color: string;
+  detailColor: string;
+  branches: { length: number, angle: number, thickness: number }[];
+
+  constructor(width: number, height: number) {
+    this.x = Math.random() * width;
+    this.y = height - 30 - Math.random() * 30;
+    this.z = Math.random() * 100;
+    this.width = 250 + Math.random() * 250;
+    this.height = 60 + Math.random() * 60;
+    this.rotation = (Math.random() - 0.5) * 0.4;
+    
+    // Weathered driftwood colors
+    const woodShades = [
+      { base: '#8d6e63', detail: '#5d4037' }, // Warm tan
+      { base: '#a1887f', detail: '#795548' }, // Lighter weathered
+      { base: '#795548', detail: '#4e342e' }, // Darker weathered
+      { base: '#bcaaa4', detail: '#8d6e63' }, // Silvery tan
+    ];
+    const wood = woodShades[Math.floor(Math.random() * woodShades.length)];
+    this.color = wood.base;
+    this.detailColor = wood.detail;
+    
+    this.branches = [];
+    const numBranches = 2 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < numBranches; i++) {
+      this.branches.push({
+        length: 80 + Math.random() * 120,
+        angle: (Math.random() - 0.5) * 1.5,
+        thickness: 18 + Math.random() * 12
+      });
+    }
+  }
+
+  draw(ctx: CanvasRenderingContext2D) {
+    const depthScale = 0.6 + (this.z / 100) * 0.6;
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.rotation);
+    ctx.scale(depthScale, depthScale);
+
+    // Subtle shadow
+    ctx.globalAlpha = 0.2;
+    ctx.fillStyle = '#000';
     ctx.beginPath();
-    ctx.ellipse(-this.width * 0.2, -this.height * 0.2, this.width * 0.5, this.height * 0.5, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, this.height * 0.4, this.width * 0.6, this.height * 0.2, 0, 0, Math.PI * 2);
     ctx.fill();
+    ctx.globalAlpha = 1.0;
+
+    ctx.fillStyle = this.color;
+    ctx.strokeStyle = this.detailColor;
+    ctx.lineWidth = 2;
+
+    // Main trunk
+    ctx.beginPath();
+    ctx.ellipse(0, 0, this.width * 0.5, this.height * 0.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Wood grain detail
+    ctx.globalAlpha = 0.3;
+    ctx.strokeStyle = this.detailColor;
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 5; i++) {
+      ctx.beginPath();
+      const yOff = (Math.random() - 0.5) * this.height * 0.4;
+      ctx.moveTo(-this.width * 0.4, yOff);
+      ctx.bezierCurveTo(
+        -this.width * 0.2, yOff + (Math.random() - 0.5) * 10,
+        this.width * 0.2, yOff + (Math.random() - 0.5) * 10,
+        this.width * 0.4, yOff
+      );
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1.0;
+
+    // Branches
+    this.branches.forEach((branch, i) => {
+      ctx.save();
+      const xPos = (i / (this.branches.length - 1) - 0.5) * this.width * 0.7;
+      ctx.translate(xPos, 0);
+      ctx.rotate(branch.angle);
+      
+      // Tapered branch with rounded end
+      const tipRadius = branch.thickness * 0.25;
+      ctx.beginPath();
+      ctx.moveTo(0, -branch.thickness * 0.5);
+      ctx.quadraticCurveTo(branch.length * 0.5, -branch.thickness * 0.4, branch.length - tipRadius, -tipRadius);
+      ctx.arc(branch.length - tipRadius, 0, tipRadius, -Math.PI/2, Math.PI/2);
+      ctx.quadraticCurveTo(branch.length * 0.5, branch.thickness * 0.4, 0, branch.thickness * 0.5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Branch grain
+      ctx.globalAlpha = 0.2;
+      ctx.beginPath();
+      ctx.moveTo(branch.length * 0.2, 0);
+      ctx.lineTo(branch.length * 0.8, 0);
+      ctx.stroke();
+      ctx.globalAlpha = 1.0;
+      
+      ctx.restore();
+    });
+
+    // Texture lines
+    ctx.globalAlpha = 0.3;
+    ctx.strokeStyle = '#000';
+    ctx.beginPath();
+    for (let i = 0; i < 8; i++) {
+      const ty = (i - 4) * (this.height * 0.1);
+      const xStart = -this.width * 0.4 * (1 - Math.abs(ty/this.height));
+      const xEnd = this.width * 0.4 * (1 - Math.abs(ty/this.height));
+      ctx.moveTo(xStart, ty);
+      ctx.lineTo(xEnd, ty);
+    }
+    ctx.stroke();
+    
     ctx.restore();
   }
 }
@@ -751,6 +964,9 @@ export class GhostShrimp {
   facingRight: boolean;
   state: 'walking' | 'swimming' | 'climbing';
   targetPlant: Plant | null;
+  targetRock: Rock | null;
+  targetWood: Driftwood | null;
+  surfacePoint: { x: number, y: number } | null;
   swimPhase: number;
   z: number;
   vz: number;
@@ -770,26 +986,42 @@ export class GhostShrimp {
     this.facingRight = Math.random() > 0.5;
     this.state = 'walking';
     this.targetPlant = null;
+    this.targetRock = null;
+    this.targetWood = null;
+    this.surfacePoint = null;
     this.swimPhase = 0;
   }
 
-  update(width: number, height: number, foods: Food[], plants: Plant[]) {
+  update(width: number, height: number, foods: Food[], plants: Plant[], environment: (Pebble | Rock | Driftwood)[]) {
     this.width = width;
     this.height = height;
     const floorY = height - 15;
+    
+    const rocks = environment.filter(e => e instanceof Rock) as Rock[];
+    const woods = environment.filter(e => e instanceof Driftwood) as Driftwood[];
 
     if (this.state === 'walking') {
-      this.y = floorY;
+      // If on a rock or wood, stay on its surface
+      if (this.targetRock && this.surfacePoint) {
+        this.y = this.targetRock.y + this.surfacePoint.y;
+        this.x = this.targetRock.x + this.surfacePoint.x;
+      } else if (this.targetWood && this.surfacePoint) {
+        this.y = this.targetWood.y + this.surfacePoint.y;
+        this.x = this.targetWood.x + this.surfacePoint.x;
+      } else {
+        this.y = floorY;
+      }
+      
       this.vy = 0;
 
-      // Look for food near the bottom
+      // Look for food
       let closestFood: Food | null = null;
       let minDist = Infinity;
 
       for (const f of foods) {
-        if (!f.eaten && f.y > this.height - 40) {
-          const dist = Math.abs(f.x - this.x);
-          if (dist < minDist) {
+        if (!f.eaten) {
+          const dist = Math.sqrt(Math.pow(f.x - this.x, 2) + Math.pow(f.y - this.y, 2));
+          if (dist < minDist && dist < 200) {
             minDist = dist;
             closestFood = f;
           }
@@ -798,7 +1030,13 @@ export class GhostShrimp {
 
       if (closestFood) {
         this.targetX = closestFood.x;
-        if (minDist < 15 && Math.abs(closestFood.y - this.y) < 20) {
+        // If food is higher up, maybe swim to it
+        if (closestFood.y < this.y - 20 && Math.random() < 0.05) {
+          this.state = 'swimming';
+          this.targetY = closestFood.y;
+        }
+        
+        if (minDist < 15) {
           closestFood.eaten = true;
           this.targetX = null;
         }
@@ -806,36 +1044,56 @@ export class GhostShrimp {
         if (this.targetX === null || Math.abs(this.targetX - this.x) < 5) {
           const rand = Math.random();
           if (rand < 0.015 && plants.length > 0) {
-            // Start climbing
+            // Start climbing a plant
             this.state = 'climbing';
             this.targetPlant = plants[Math.floor(Math.random() * plants.length)];
+            this.targetRock = null;
+            this.targetWood = null;
             this.targetX = this.targetPlant.x;
+            this.vz = (this.targetPlant.z - this.z) * 0.1;
+          } else if (rand < 0.01 && rocks.length > 0) {
+            // Start climbing a rock
+            this.state = 'climbing';
+            this.targetRock = rocks[Math.floor(Math.random() * rocks.length)];
+            this.targetPlant = null;
+            this.targetWood = null;
+            this.targetX = this.targetRock.x;
+            this.vz = (this.targetRock.z - this.z) * 0.1;
+          } else if (rand < 0.01 && woods.length > 0) {
+            // Start climbing driftwood
+            this.state = 'climbing';
+            this.targetWood = woods[Math.floor(Math.random() * woods.length)];
+            this.targetPlant = null;
+            this.targetRock = null;
+            this.targetX = this.targetWood.x;
+            this.vz = (this.targetWood.z - this.z) * 0.1;
           } else if (rand < 0.02) {
-            // Start swimming and change depth
+            // Start swimming
             this.state = 'swimming';
+            this.targetPlant = null;
+            this.targetRock = null;
+            this.targetWood = null;
             this.targetX = this.x + (Math.random() * 300 - 150);
-            this.targetY = this.y - 100 - Math.random() * 250; // Swim higher
+            this.targetY = this.y - 100 - Math.random() * 250;
             this.targetX = Math.max(20, Math.min(this.width - 20, this.targetX));
             this.targetY = Math.max(50, this.targetY);
             
-            // Randomly move towards front (z=100) or back (z=0)
             const targetZ = Math.random() * 100;
-            const dz = targetZ - this.z;
-            this.vz = dz * 0.01;
+            this.vz = (targetZ - this.z) * 0.01;
           } else if (rand < 0.05) {
             this.targetX = this.x + (Math.random() * 400 - 200);
             this.targetX = Math.max(20, Math.min(this.width - 20, this.targetX));
           } else if (rand < 0.1) {
-            this.targetX = null; // stop moving
+            this.targetX = null;
           }
         }
       }
 
-      if (this.targetX !== null) {
+      if (this.targetX !== null && !this.targetRock && !this.targetWood) {
         this.targetX = Math.max(10, Math.min(this.width - 10, this.targetX));
         const dx = this.targetX - this.x;
         if (Math.abs(dx) > 2) {
-          this.vx = Math.sign(dx) * 0.12; // Reduced walking speed
+          this.vx = Math.sign(dx) * 0.12;
           this.facingRight = this.vx > 0;
           this.legPhase += 0.03;
         } else {
@@ -845,7 +1103,6 @@ export class GhostShrimp {
         this.vx = 0;
       }
       
-      // Friction for z-velocity
       this.vz *= 0.95;
 
     } else if (this.state === 'swimming') {
@@ -901,51 +1158,127 @@ export class GhostShrimp {
       this.legPhase += 0.05;
       
       if (this.targetPlant) {
+        // Plant climbing logic
+        this.z += this.vz;
+        this.vz *= 0.9;
+        
         if (this.targetPlant.x < 10 || this.targetPlant.x > this.width - 10) {
           this.targetPlant = null;
           this.state = 'swimming';
           this.targetX = this.x;
           this.targetY = floorY;
         } else {
-          // First move to the plant
           const dx = this.targetPlant.x - this.x;
           if (Math.abs(dx) > 2 && this.y >= floorY - 5) {
-            this.vx = Math.sign(dx) * 0.15; // Slower walking speed when moving to plant
+            this.vx = Math.sign(dx) * 0.15;
             this.vy = 0;
             this.facingRight = this.vx > 0;
           } else {
-            // At the plant, climb up
             this.vx = 0;
-            this.x = this.targetPlant.x; // Snap to plant
-            
-            // Determine how high we can climb (plant's current height)
+            this.x = this.targetPlant.x;
             const minClimbY = this.targetPlant.y - this.targetPlant.currentHeight + 20;
-            
             if (this.targetY === null || this.targetY > this.y) {
-              // Set a target to climb up to
               this.targetY = minClimbY + Math.random() * (this.y - minClimbY);
             }
-            
             const dy = this.targetY - this.y;
             if (Math.abs(dy) > 2) {
-              this.vy = Math.sign(dy) * 0.2; // Climb slowly
-              // Face up/down the plant? For now just alternate or face plant center
+              this.vy = Math.sign(dy) * 0.2;
               this.facingRight = Math.sin(Date.now() / 500) > 0;
             } else {
-              // Reached climb target
               if (Math.random() < 0.02) {
-                // Swim away
                 this.state = 'swimming';
                 this.targetX = this.x + (Math.random() > 0.5 ? 50 : -50);
                 this.targetY = this.y - 20;
-                this.targetX = Math.max(20, Math.min(this.width - 20, this.targetX));
                 this.targetPlant = null;
               } else if (Math.random() < 0.05) {
-                // Pick a new spot on the plant
                 this.targetY = minClimbY + Math.random() * (floorY - minClimbY);
               } else {
-                this.vy = 0; // Just hang out
+                this.vy = 0;
               }
+            }
+          }
+        }
+      } else if (this.targetRock) {
+        // Rock climbing logic
+        this.z += this.vz;
+        this.vz *= 0.9;
+        
+        const dx = this.targetRock.x - this.x;
+        if (Math.abs(dx) > 5 && !this.surfacePoint) {
+          this.vx = Math.sign(dx) * 0.15;
+          this.vy = 0;
+          this.facingRight = this.vx > 0;
+        } else {
+          this.vx = 0;
+          if (!this.surfacePoint) {
+            // Pick a point on the rock surface
+            const angle = Math.random() * Math.PI; // Top half
+            const r = 0.5 + Math.random() * 0.4;
+            this.surfacePoint = {
+              x: Math.cos(angle) * this.targetRock.width * 0.5 * r,
+              y: -Math.sin(angle) * this.targetRock.height * 0.5 * r
+            };
+            this.targetY = this.targetRock.y + this.surfacePoint.y;
+            this.targetX = this.targetRock.x + this.surfacePoint.x;
+          }
+          
+          const dy = this.targetY! - this.y;
+          const dx2 = this.targetX! - this.x;
+          if (Math.abs(dy) > 2 || Math.abs(dx2) > 2) {
+            const dist = Math.sqrt(dx2 * dx2 + dy * dy);
+            this.vx = (dx2 / dist) * 0.2;
+            this.vy = (dy / dist) * 0.2;
+            this.facingRight = this.vx > 0;
+          } else {
+            this.vx = 0;
+            this.vy = 0;
+            if (Math.random() < 0.01) {
+              this.state = 'walking'; // Stay on rock but in walking state
+            } else if (Math.random() < 0.01) {
+              this.state = 'swimming';
+              this.targetRock = null;
+              this.surfacePoint = null;
+            }
+          }
+        }
+      } else if (this.targetWood) {
+        // Wood climbing logic
+        this.z += this.vz;
+        this.vz *= 0.9;
+        
+        const dx = this.targetWood.x - this.x;
+        if (Math.abs(dx) > 5 && !this.surfacePoint) {
+          this.vx = Math.sign(dx) * 0.15;
+          this.vy = 0;
+          this.facingRight = this.vx > 0;
+        } else {
+          this.vx = 0;
+          if (!this.surfacePoint) {
+            // Pick a point on the wood
+            this.surfacePoint = {
+              x: (Math.random() - 0.5) * this.targetWood.width * 0.8,
+              y: (Math.random() - 0.5) * this.targetWood.height * 0.4
+            };
+            this.targetY = this.targetWood.y + this.surfacePoint.y;
+            this.targetX = this.targetWood.x + this.surfacePoint.x;
+          }
+          
+          const dy = this.targetY! - this.y;
+          const dx2 = this.targetX! - this.x;
+          if (Math.abs(dy) > 2 || Math.abs(dx2) > 2) {
+            const dist = Math.sqrt(dx2 * dx2 + dy * dy);
+            this.vx = (dx2 / dist) * 0.2;
+            this.vy = (dy / dist) * 0.2;
+            this.facingRight = this.vx > 0;
+          } else {
+            this.vx = 0;
+            this.vy = 0;
+            if (Math.random() < 0.01) {
+              this.state = 'walking';
+            } else if (Math.random() < 0.01) {
+              this.state = 'swimming';
+              this.targetWood = null;
+              this.surfacePoint = null;
             }
           }
         }

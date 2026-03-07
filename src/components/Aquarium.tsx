@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
-import { VectorFish, Bubble, Food, Pebble, Rock, Plant, GhostShrimp, SideFilter } from '../lib/entities';
+import { VectorFish, Bubble, Food, Pebble, Rock, Driftwood, Plant, GhostShrimp, SideFilter } from '../lib/entities';
 
 export interface AquariumRef {
   addFish: (species: 'tetra' | 'clownfish') => void;
@@ -71,16 +71,18 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
     const generateEnvironment = () => {
       const pebbles: Pebble[] = [];
       const rocks: Rock[] = [];
+      const driftwoods: Driftwood[] = [];
       const plants: Plant[] = [];
       
       // Increase pebble count for a denser floor
       const numPebbles = sim.width < 800 ? 500 : 1000;
       for (let i = 0; i < numPebbles; i++) pebbles.push(new Pebble(sim.width, sim.height));
-      for (let i = 0; i < 10; i++) rocks.push(new Rock(sim.width, sim.height));
+      for (let i = 0; i < 6; i++) rocks.push(new Rock(sim.width, sim.height));
+      for (let i = 0; i < 2; i++) driftwoods.push(new Driftwood(sim.width, sim.height));
       for (let i = 0; i < 35; i++) plants.push(new Plant(sim.width, sim.height));
 
       // Combine and sort by Y coordinate for correct depth rendering
-      sim.environment = [...pebbles, ...rocks].sort((a, b) => a.y - b.y);
+      sim.environment = [...pebbles, ...rocks, ...driftwoods].sort((a, b) => a.y - b.y);
       sim.plants = plants;
     };
 
@@ -110,7 +112,7 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
 
         generateEnvironment();
         
-        // Cache static environment (pebbles and rocks) to layered offscreen canvases for parallax
+        // Cache static environment (pebbles, rocks, driftwood) to layered offscreen canvases for parallax
         const envCanvases: HTMLCanvasElement[] = [];
         for (let i = 0; i < 3; i++) {
           const ec = document.createElement('canvas');
@@ -289,11 +291,11 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
           p.draw(ctx, time, flow);
         } else if (entity.type === 'fish') {
           const f = entity.obj as VectorFish;
-          f.update(sim.width, sim.height, sim.fishes, sim.foods, flow);
+          f.update(sim.width, sim.height, sim.fishes, sim.foods, flow, sim.environment);
           f.draw(ctx);
         } else if (entity.type === 'shrimp') {
           const s = entity.obj as GhostShrimp;
-          s.update(sim.width, sim.height, sim.foods, sim.plants);
+          s.update(sim.width, sim.height, sim.foods, sim.plants, sim.environment);
           s.draw(ctx);
         }
       });
