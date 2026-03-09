@@ -48,7 +48,7 @@ export class VectorFish {
     this.idOffset = Math.random() * 1000;
   }
 
-  update(width: number, height: number, fishes: VectorFish[], foods: Food[], flow: number, environment: (Pebble | Rock | Driftwood)[]) {
+  update(width: number, height: number, fishes: VectorFish[], foods: Food[], flow: number, environment: (Pebble | Rock | Driftwood)[], sideFilter: SideFilter | null) {
     let ax = 0;
     let ay = 0;
 
@@ -146,16 +146,17 @@ export class VectorFish {
       ay += Math.sin(time * 0.6) * this.maxForce * wanderMult;
       
       // Swim against current instinct
-      if (flow > 0 && this.x > width * 0.4) {
+      const virtualWidth = width + 800; // Extend tank to the right
+      if (flow > 0 && this.x > virtualWidth * 0.4) {
         // Stronger urge to swim left as they get further right
-        const rightBias = (this.x - width * 0.4) / (width * 0.6);
+        const rightBias = (this.x - virtualWidth * 0.4) / (virtualWidth * 0.6);
         ax -= (flow / 100) * this.maxForce * (1.0 + rightBias * 2.0); 
       }
 
       // Repel from side filter (top pump) area for tetras
-      if (this.species === 'tetra') {
-        const pumpX = 0;
-        const pumpY = 80;
+      if (this.species === 'tetra' && sideFilter) {
+        const pumpX = sideFilter.x + sideFilter.width;
+        const pumpY = sideFilter.y + sideFilter.height / 2;
         const dx = this.x - pumpX;
         const dy = this.y - pumpY;
         const distSq = dx * dx + dy * dy;
@@ -206,9 +207,10 @@ export class VectorFish {
     const marginX = 100;
     const marginY = 80;
     const turnFactor = this.maxForce * 6;
+    const virtualWidth = width + 800; // Extend tank to the right
     
     if (this.x < marginX) ax += turnFactor * (marginX - this.x) / marginX;
-    if (this.x > width - marginX) ax -= turnFactor * (this.x - (width - marginX)) / marginX;
+    if (this.x > virtualWidth - marginX) ax -= turnFactor * (this.x - (virtualWidth - marginX)) / marginX;
     
     if (this.y < marginY) ay += turnFactor * (marginY - this.y) / marginY;
     if (this.y > height - marginY - 50) ay -= turnFactor * (this.y - (height - marginY - 50)) / marginY;
@@ -809,7 +811,7 @@ export class Plant {
     }
   }
 
-  draw(ctx: CanvasRenderingContext2D, time: number, flow: number) {
+  draw(ctx: CanvasRenderingContext2D, time: number, flow: number, sideFilter: any = null) {
     ctx.save();
     // Parallax scale based on z-depth
     const depthScale = 0.6 + (this.z / 100) * 0.6;
@@ -818,7 +820,21 @@ export class Plant {
     ctx.scale(depthScale, depthScale);
     ctx.translate(-this.x, -this.y);
 
-    const flowMag = flow / 100;
+    let effectiveFlow = flow;
+    if (sideFilter) {
+      const filterCenterY = sideFilter.y + sideFilter.height / 2;
+      const plantTop = this.y - this.currentHeight;
+      const plantBottom = this.y;
+      
+      // Check if filter is vertically aligned with the plant
+      if (filterCenterY >= plantTop - 50 && filterCenterY <= plantBottom + 50) {
+        // Calculate horizontal distance factor (closer = stronger)
+        const distFactor = Math.max(0, 1 - this.x / 800); 
+        effectiveFlow += flow * 2.0 * distFactor; // Up to 3x flow
+      }
+    }
+
+    const flowMag = effectiveFlow / 100;
     const flowTilt = flowMag * 40; // Constant tilt to the right
     
     if (this.type === 'grass' && this.blades) {
@@ -993,7 +1009,7 @@ export class GhostShrimp {
   }
 
   update(width: number, height: number, foods: Food[], plants: Plant[], environment: (Pebble | Rock | Driftwood)[]) {
-    this.width = width;
+    this.width = width + 800; // Extend tank to the right
     this.height = height;
     const floorY = height - 15;
     

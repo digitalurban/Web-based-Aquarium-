@@ -17,6 +17,9 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
     flow: 50,
     airPump: 50,
     lightZoom: 0.1,
+    isDraggingFilter: false,
+    dragOffsetY: 0,
+    dragPointerId: -1,
   });
 
   const simRef = useRef({
@@ -24,7 +27,7 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
     foods: [] as Food[],
     bubbles: [] as Bubble[],
     shrimps: [] as GhostShrimp[],
-    environment: [] as (Pebble | Rock)[],
+    environment: [] as (Pebble | Rock | Driftwood)[],
     plants: [] as Plant[],
     sideFilter: null as SideFilter | null,
     width: 0,
@@ -75,11 +78,12 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
       const plants: Plant[] = [];
       
       // Increase pebble count for a denser floor
-      const numPebbles = sim.width < 800 ? 500 : 1000;
-      for (let i = 0; i < numPebbles; i++) pebbles.push(new Pebble(sim.width, sim.height));
-      for (let i = 0; i < 6; i++) rocks.push(new Rock(sim.width, sim.height));
-      for (let i = 0; i < 2; i++) driftwoods.push(new Driftwood(sim.width, sim.height));
-      for (let i = 0; i < 35; i++) plants.push(new Plant(sim.width, sim.height));
+      const virtualWidth = sim.width + 800;
+      const numPebbles = virtualWidth < 800 ? 500 : 1000;
+      for (let i = 0; i < numPebbles; i++) pebbles.push(new Pebble(virtualWidth, sim.height));
+      for (let i = 0; i < 6; i++) rocks.push(new Rock(virtualWidth, sim.height));
+      for (let i = 0; i < 2; i++) driftwoods.push(new Driftwood(virtualWidth, sim.height));
+      for (let i = 0; i < 35; i++) plants.push(new Plant(virtualWidth, sim.height));
 
       // Combine and sort by Y coordinate for correct depth rendering
       sim.environment = [...pebbles, ...rocks, ...driftwoods].sort((a, b) => a.y - b.y);
@@ -101,7 +105,11 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
         sim.width = parent.clientWidth;
         sim.height = parent.clientHeight;
         
+        const oldY = sim.sideFilter?.y;
         sim.sideFilter = new SideFilter(sim.width, sim.height);
+        if (oldY !== undefined) {
+          sim.sideFilter.y = Math.max(0, Math.min(sim.height - sim.sideFilter.height, oldY));
+        }
         
         // Cache background gradient
         const grad = ctx.createLinearGradient(0, 0, 0, sim.height);
@@ -288,10 +296,10 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
         if (entity.type === 'plant') {
           const p = entity.obj as Plant;
           p.update();
-          p.draw(ctx, time, flow);
+          p.draw(ctx, time, flow, sim.sideFilter);
         } else if (entity.type === 'fish') {
           const f = entity.obj as VectorFish;
-          f.update(sim.width, sim.height, sim.fishes, sim.foods, flow, sim.environment);
+          f.update(sim.width, sim.height, sim.fishes, sim.foods, flow, sim.environment, sim.sideFilter);
           f.draw(ctx);
         } else if (entity.type === 'shrimp') {
           const s = entity.obj as GhostShrimp;
@@ -317,7 +325,9 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
     };
   }, []);
 
-  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (stateRef.current.isDraggingFilter) return;
+
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -325,17 +335,65 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
     const y = e.clientY - rect.top;
     
     const sim = simRef.current;
+    const filter = sim.sideFilter;
+    
+    if (filter) {
+      const hitPadding = 20;
+      if (
+        x >= filter.x - hitPadding && 
+        x <= filter.x + filter.width + hitPadding &&
+        y >= filter.y - hitPadding &&
+        y <= filter.y + filter.height + hitPadding
+      ) {
+        stateRef.current.isDraggingFilter = true;
+        stateRef.current.dragOffsetY = y - filter.y;
+        stateRef.current.dragPointerId = e.pointerId;
+        canvas.setPointerCapture(e.pointerId);
+        return;
+      }
+    }
+    
     const count = Math.floor(Math.random() * 4) + 2;
     for (let i = 0; i < count; i++) {
       sim.foods.push(new Food(x + (Math.random() * 30 - 15), y));
     }
   };
 
+  const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!stateRef.current.isDraggingFilter || e.pointerId !== stateRef.current.dragPointerId) return;
+    
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    
+    const sim = simRef.current;
+    if (sim.sideFilter) {
+      let newY = y - stateRef.current.dragOffsetY;
+      newY = Math.max(0, Math.min(sim.height - sim.sideFilter.height, newY));
+      sim.sideFilter.y = newY;
+    }
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (stateRef.current.isDraggingFilter && e.pointerId === stateRef.current.dragPointerId) {
+      stateRef.current.isDraggingFilter = false;
+      stateRef.current.dragPointerId = -1;
+      const canvas = canvasRef.current;
+      if (canvas) {
+        canvas.releasePointerCapture(e.pointerId);
+      }
+    }
+  };
+
   return (
     <canvas 
       ref={canvasRef} 
-      className="w-full h-full block cursor-crosshair"
-      onClick={handleCanvasClick}
+      className="w-full h-full block cursor-crosshair touch-none"
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
     />
   );
 });
