@@ -20,6 +20,10 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
     isDraggingFilter: false,
     dragOffsetY: 0,
     dragPointerId: -1,
+    cameraX: 0,
+    isDraggingBackground: false,
+    dragStartX: 0,
+    dragStartCameraX: 0,
   });
 
   const simRef = useRef({
@@ -29,6 +33,7 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
     shrimps: [] as GhostShrimp[],
     environment: [] as (Pebble | Rock | Driftwood)[],
     plants: [] as Plant[],
+    taps: [] as {x: number, y: number, age: number, maxAge: number}[],
     sideFilter: null as SideFilter | null,
     width: 0,
     height: 0,
@@ -121,10 +126,11 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
         generateEnvironment();
         
         // Cache static environment (pebbles, rocks, driftwood) to layered offscreen canvases for parallax
+        const virtualWidth = sim.width + 800;
         const envCanvases: HTMLCanvasElement[] = [];
         for (let i = 0; i < 3; i++) {
           const ec = document.createElement('canvas');
-          ec.width = canvas.width;
+          ec.width = virtualWidth * dpr;
           ec.height = canvas.height;
           const ectx = ec.getContext('2d');
           if (ectx) {
@@ -138,7 +144,7 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
               grad.addColorStop(0.3, 'rgba(25, 35, 45, 0.9)');
               grad.addColorStop(1, 'rgba(5, 10, 15, 1)');
               ectx.fillStyle = grad;
-              ectx.fillRect(0, sim.height - gravelBaseHeight, sim.width, gravelBaseHeight);
+              ectx.fillRect(0, sim.height - gravelBaseHeight, virtualWidth, gravelBaseHeight);
             }
             
             const minZ = i * 33.3;
@@ -171,22 +177,25 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
 
     const drawBackground = () => {
       const time = Date.now() / 1000;
-      const { lightZoom } = stateRef.current;
+      const { lightZoom, cameraX } = stateRef.current;
+      const virtualWidth = sim.width + 800;
 
-      // Realistic Blue Deep water gradient
+      // Realistic Blue Deep water gradient (fixed to screen)
       if (sim.bgGradient) {
         ctx.fillStyle = sim.bgGradient;
         ctx.fillRect(0, 0, sim.width, sim.height);
       }
 
-      // Light rays
       ctx.save();
+      ctx.translate(-cameraX, 0);
+
+      // Light rays
       // Use default composite operation (source-over) for best performance on Safari
-      const numRays = sim.width < 800 ? 3 : 5;
+      const numRays = virtualWidth < 800 ? 3 : 5;
       const raySpread = 200 * lightZoom;
       
       for (let i = 0; i < numRays; i++) {
-        const x = (sim.width / numRays) * i + Math.sin(time * 0.5 + i) * 50;
+        const x = (virtualWidth / numRays) * i + Math.sin(time * 0.5 + i) * 50;
         
         // Use simple fill instead of gradient for rays to save performance
         ctx.fillStyle = `rgba(200, 235, 255, ${0.05 * lightZoom})`;
@@ -197,38 +206,42 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
         ctx.lineTo(x - raySpread, sim.height);
         ctx.fill();
       }
-      ctx.restore();
 
       // Water surface
       ctx.fillStyle = 'rgba(220, 245, 255, 0.08)';
       ctx.beginPath();
       ctx.moveTo(0, 0);
-      for (let x = 0; x <= sim.width; x += 20) {
+      for (let x = 0; x <= virtualWidth; x += 20) {
         ctx.lineTo(x, 20 + Math.sin(x * 0.02 + time) * 3);
       }
-      ctx.lineTo(sim.width, 0);
+      ctx.lineTo(virtualWidth, 0);
       ctx.fill();
       
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
       ctx.lineWidth = 2;
       ctx.beginPath();
-      for (let x = 0; x <= sim.width; x += 20) {
+      for (let x = 0; x <= virtualWidth; x += 20) {
         const y = 20 + Math.sin(x * 0.02 + time) * 3;
         if (x === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       }
       ctx.stroke();
+      
+      ctx.restore();
     };
 
     const loop = () => {
       const time = Date.now() / 1000;
-      const { flow: rawFlow, airPump } = stateRef.current;
+      const { flow: rawFlow, airPump, cameraX } = stateRef.current;
       
       // Scale flow so 100% is equivalent to the old 30%
       const flow = rawFlow * 0.3;
 
       drawBackground();
       
+      ctx.save();
+      ctx.translate(-cameraX, 0);
+
       // Side Filter
       if (sim.sideFilter) {
         sim.sideFilter.update(sim.bubbles, time, rawFlow);
@@ -251,13 +264,34 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
 
       // Random ambient bubbles (reduced frequency)
       if (Math.random() < 0.005) {
-        sim.bubbles.push(new Bubble(Math.random() * sim.width, sim.height - 20, 0.5));
+        sim.bubbles.push(new Bubble(Math.random() * (sim.width + 800), sim.height - 20, 0.5));
       }
       
       sim.bubbles = sim.bubbles.filter(b => b.y + b.size > 0);
       sim.bubbles.forEach(b => {
-        b.update(flow, sim.width);
+        b.update(flow, sim.width + 800);
         b.draw(ctx);
+      });
+
+      // Taps
+      sim.taps = sim.taps.filter(t => t.age < t.maxAge);
+      sim.taps.forEach(t => {
+        t.age += 1;
+        const progress = t.age / t.maxAge;
+        const radius = progress * 100;
+        const alpha = 1 - progress;
+        
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, radius, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.5})`;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, radius * 0.7, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.2})`;
+        ctx.lineWidth = 1;
+        ctx.stroke();
       });
 
       // Foods
@@ -280,7 +314,7 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
       const drawEnvLayer = (layer: number) => {
         if (sim.envCanvases[layer]) {
           ctx.save();
-          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.setTransform(1, 0, 0, 1, -cameraX, 0);
           ctx.drawImage(sim.envCanvases[layer], 0, 0);
           ctx.restore();
         }
@@ -296,15 +330,21 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
         if (entity.type === 'plant') {
           const p = entity.obj as Plant;
           p.update();
-          p.draw(ctx, time, flow, sim.sideFilter);
+          if (p.x > cameraX - 200 && p.x < cameraX + sim.width + 200) {
+            p.draw(ctx, time, flow, sim.sideFilter);
+          }
         } else if (entity.type === 'fish') {
           const f = entity.obj as VectorFish;
-          f.update(sim.width, sim.height, sim.fishes, sim.foods, flow, sim.environment, sim.sideFilter);
-          f.draw(ctx);
+          f.update(sim.width, sim.height, sim.fishes, sim.foods, flow, sim.environment, sim.sideFilter, sim.taps);
+          if (f.x > cameraX - 100 && f.x < cameraX + sim.width + 100) {
+            f.draw(ctx);
+          }
         } else if (entity.type === 'shrimp') {
           const s = entity.obj as GhostShrimp;
           s.update(sim.width, sim.height, sim.foods, sim.plants, sim.environment);
-          s.draw(ctx);
+          if (s.x > cameraX - 100 && s.x < cameraX + sim.width + 100) {
+            s.draw(ctx);
+          }
         }
       });
 
@@ -313,6 +353,8 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
         drawEnvLayer(currentEnvLayer);
         currentEnvLayer++;
       }
+
+      ctx.restore();
 
       animationId = requestAnimationFrame(loop);
     };
@@ -326,13 +368,14 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
   }, []);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (stateRef.current.isDraggingFilter) return;
+    if (stateRef.current.isDraggingFilter || stateRef.current.isDraggingBackground) return;
 
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+    const simX = x + stateRef.current.cameraX;
     
     const sim = simRef.current;
     const filter = sim.sideFilter;
@@ -340,8 +383,8 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
     if (filter) {
       const hitPadding = 20;
       if (
-        x >= filter.x - hitPadding && 
-        x <= filter.x + filter.width + hitPadding &&
+        simX >= filter.x - hitPadding && 
+        simX <= filter.x + filter.width + hitPadding &&
         y >= filter.y - hitPadding &&
         y <= filter.y + filter.height + hitPadding
       ) {
@@ -353,36 +396,66 @@ const Aquarium = forwardRef<AquariumRef, {}>((props, ref) => {
       }
     }
     
-    const count = Math.floor(Math.random() * 4) + 2;
-    for (let i = 0; i < count; i++) {
-      sim.foods.push(new Food(x + (Math.random() * 30 - 15), y));
-    }
+    stateRef.current.isDraggingBackground = true;
+    stateRef.current.dragStartX = e.clientX;
+    stateRef.current.dragStartCameraX = stateRef.current.cameraX;
+    stateRef.current.dragPointerId = e.pointerId;
+    canvas.setPointerCapture(e.pointerId);
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!stateRef.current.isDraggingFilter || e.pointerId !== stateRef.current.dragPointerId) return;
+    if (e.pointerId !== stateRef.current.dragPointerId) return;
     
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const y = e.clientY - rect.top;
-    
-    const sim = simRef.current;
-    if (sim.sideFilter) {
-      let newY = y - stateRef.current.dragOffsetY;
-      newY = Math.max(0, Math.min(sim.height - sim.sideFilter.height, newY));
-      sim.sideFilter.y = newY;
+    if (stateRef.current.isDraggingFilter) {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const y = e.clientY - rect.top;
+      
+      const sim = simRef.current;
+      if (sim.sideFilter) {
+        let newY = y - stateRef.current.dragOffsetY;
+        newY = Math.max(0, Math.min(sim.height - sim.sideFilter.height, newY));
+        sim.sideFilter.y = newY;
+      }
+    } else if (stateRef.current.isDraggingBackground) {
+      const dx = e.clientX - stateRef.current.dragStartX;
+      let newCameraX = stateRef.current.dragStartCameraX - dx;
+      newCameraX = Math.max(0, Math.min(800, newCameraX));
+      stateRef.current.cameraX = newCameraX;
     }
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (stateRef.current.isDraggingFilter && e.pointerId === stateRef.current.dragPointerId) {
-      stateRef.current.isDraggingFilter = false;
-      stateRef.current.dragPointerId = -1;
+    if (e.pointerId === stateRef.current.dragPointerId) {
       const canvas = canvasRef.current;
       if (canvas) {
         canvas.releasePointerCapture(e.pointerId);
       }
+      
+      if (stateRef.current.isDraggingBackground) {
+        const dx = Math.abs(e.clientX - stateRef.current.dragStartX);
+        if (dx < 5) { // It was a tap
+          const rect = canvas?.getBoundingClientRect();
+          if (rect) {
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            const simX = x + stateRef.current.cameraX;
+            const sim = simRef.current;
+            
+            sim.taps.push({ x: simX, y, age: 0, maxAge: 60 });
+            
+            const count = Math.floor(Math.random() * 4) + 2;
+            for (let i = 0; i < count; i++) {
+              sim.foods.push(new Food(simX + (Math.random() * 30 - 15), y));
+            }
+          }
+        }
+      }
+      
+      stateRef.current.isDraggingFilter = false;
+      stateRef.current.isDraggingBackground = false;
+      stateRef.current.dragPointerId = -1;
     }
   };
 

@@ -48,7 +48,7 @@ export class VectorFish {
     this.idOffset = Math.random() * 1000;
   }
 
-  update(width: number, height: number, fishes: VectorFish[], foods: Food[], flow: number, environment: (Pebble | Rock | Driftwood)[], sideFilter: SideFilter | null) {
+  update(width: number, height: number, fishes: VectorFish[], foods: Food[], flow: number, environment: (Pebble | Rock | Driftwood)[], sideFilter: SideFilter | null, taps: {x: number, y: number, age: number, maxAge: number}[]) {
     let ax = 0;
     let ay = 0;
 
@@ -144,6 +144,21 @@ export class VectorFish {
       const wanderMult = this.species === 'tetra' ? 0.8 : 1.8;
       ax += Math.cos(time * 0.5) * this.maxForce * wanderMult;
       ay += Math.sin(time * 0.6) * this.maxForce * wanderMult;
+      
+      // Tap evasion
+      for (const tap of taps) {
+        const dx = this.x - tap.x;
+        const dy = this.y - tap.y;
+        const distSq = dx * dx + dy * dy;
+        if (distSq < 300 * 300) {
+          const dist = Math.sqrt(distSq);
+          // Strongest force when tap is new
+          const ageFactor = 1 - (tap.age / tap.maxAge);
+          const force = (1 - dist / 300) * this.maxForce * 20.0 * ageFactor;
+          ax += (dx / dist) * force;
+          ay += (dy / dist) * force;
+        }
+      }
       
       // Swim against current instinct
       const virtualWidth = width + 800; // Extend tank to the right
